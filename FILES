@@ -1,0 +1,10 @@
+FILES
+README
+LICENSE
+ChangeLog
+ext/extconf.rb
+ext/sendfile.c
+test/test_sendfile.rb
+test/large.gz
+test/small
+sendfile.gemspec

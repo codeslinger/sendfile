@@ -1,0 +1,21 @@
+* sendfile 0.9.3 - 2008.11.30 <toby@cbcg.net>
+
+  - Included sys/stat.h regardless of platform to fix compilation on 
+    OS X 10.5 (credit: Damon Morda <dmorda@andrew.cmu.edu>)
+  - Source formatting clean-up
+
+* sendfile 0.9.2 - 2006.03.27 <toby@cbcg.net>
+
+  - Fixed typo: s/rv_sys_fail/rb_sys_fail
+
+* sendfile 0.9.1 - 2006.03.24 <toby@cbcg.net>
+
+  - Improved interface with non-blocking sockets
+  - Added unit tests for blocking sends
+  - Added unit tests for nonblocking sends
+  - Added README
+  - Packaged in a RubyGem
+
+* sendfile 0.0.1 - 2005.11.16 <toby@cbcg.net>
+
+  - Initial release
