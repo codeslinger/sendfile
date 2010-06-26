@@ -48,11 +48,8 @@
 # include <sys/sendfile.h>
 #endif
 
-#define SENDFILE_PAUSE_SEC 	0
-#define SENDFILE_PAUSE_USEC	500
-
 #if defined(RUBY_PLATFORM_FREEBSD)
-static off_t __sendfile(int out, int in, off_t off, size_t count, struct timeval *tv)
+static off_t __sendfile(int out, int in, off_t off, size_t count)
 {
 	int rv;
 	off_t written, initial = off;
@@ -63,16 +60,15 @@ static off_t __sendfile(int out, int in, off_t off, size_t count, struct timeval
 		TRAP_END;
 		off += written;
 		count -= written;
-		if (rv < 0 && errno != EAGAIN)
-			rb_sys_fail("sendfile");
 		if (!rv)
 			break;
-		rb_thread_select(0, NULL, NULL, NULL, tv);
+		if (rv < 0 && ! rb_io_wait_writable(out))
+			rb_sys_fail("sendfile");
 	}
 	return off - initial;
 }
 #else
-static size_t __sendfile(int out, int in, off_t off, size_t count, struct timeval *tv)
+static size_t __sendfile(int out, int in, off_t off, size_t count)
 {
 	ssize_t rv, remaining = count;
 	
@@ -80,13 +76,12 @@ static size_t __sendfile(int out, int in, off_t off, size_t count, struct timeva
 		TRAP_BEG;
 		rv = sendfile(out, in, &off, remaining);
 		TRAP_END;
-		if (rv < 0 && errno != EAGAIN)
-			rb_sys_fail("sendfile");
 		if (rv > 0)
 			remaining -= rv;
 		if (!remaining)
 			break;
-		rb_thread_select(0, NULL, NULL, NULL, tv);
+		if (rv < 0 && ! rb_io_wait_writable(out))
+			rb_sys_fail("sendfile");
 	}
 	return count;
 }
@@ -113,7 +108,6 @@ static VALUE rb_io_sendfile(int argc, VALUE *argv, VALUE self)
 	off_t off;
 	OpenFile *iptr, *optr;
 	VALUE in, offset, count;
-	struct timeval _sendfile_sleep;
 
 	/* get fds for files involved to pass to sendfile(2) */
 	rb_scan_args(argc, argv, "12", &in, &offset, &count);
@@ -124,9 +118,6 @@ static VALUE rb_io_sendfile(int argc, VALUE *argv, VALUE self)
 	o = fileno(optr->f);
 	i = fileno(iptr->f);
 
-	_sendfile_sleep.tv_sec = SENDFILE_PAUSE_SEC;
-	_sendfile_sleep.tv_usec = SENDFILE_PAUSE_USEC;
-	
 	/* determine offset and count parameters */
 	off = (NIL_P(offset)) ? 0 : NUM2ULONG(offset);
 	if (NIL_P(count)) {
@@ -144,7 +135,7 @@ static VALUE rb_io_sendfile(int argc, VALUE *argv, VALUE self)
 	}
 
 	/* now send the file */
-	return INT2FIX(__sendfile(o, i, off, c, &_sendfile_sleep));
+	return INT2FIX(__sendfile(o, i, off, c));
 }
 
 /* Interface to the UNIX sendfile(2) system call. Should work on FreeBSD,
