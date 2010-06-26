@@ -177,8 +177,7 @@ static void convert_args(int argc, VALUE *argv, VALUE self,
 
 	/* get fds for files involved to pass to sendfile(2) */
 	rb_scan_args(argc, argv, "12", &in, &offset, &count);
-	if (TYPE(in) != T_FILE)
-		rb_raise(rb_eArgError, "invalid first argument\n");
+	in = rb_convert_type(in, T_FILE, "IO", "to_io");
 	args->out = my_rb_fileno(self);
 	args->in = my_rb_fileno(in);
 

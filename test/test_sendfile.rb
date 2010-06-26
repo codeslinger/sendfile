@@ -184,5 +184,19 @@ class TestSendfile < Test::Unit::TestCase
 		s.close
 		assert_equal nr_read, nr_sent
 	end
+
+	def test_tempfile
+		tmp = Tempfile.new ''
+		tmp.write @small_data
+		tmp.rewind
+		sent, read = __do_sendfile(tmp)
+		assert_equal @small_data.size, sent
+		assert_equal @small_data.size, read.size
+		assert_equal @small_data, read
+	end
+
+	def test_invalid_file
+		assert_raises(TypeError) { __do_sendfile(:hello) }
+	end
 end		# class TestSendfile
 
