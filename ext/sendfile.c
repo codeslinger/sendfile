@@ -102,6 +102,7 @@ struct sendfile_args {
 	int in;
 	off_t off;
 	off_t count;
+	int eof;
 };
 
 #if ! HAVE_RB_IO_T
@@ -137,8 +138,12 @@ static VALUE nogvl_sendfile(void *data)
 
 	rv = sendfile(args->in, args->out, args->off, args->count,
 	              NULL, &written, 0);
-	args->off += written;
-	args->count -= written;
+	if (written == 0 && rv == 0) {
+		args->eof = 1;
+	} else {
+		args->off += written;
+		args->count -= written;
+	}
 
 	return (VALUE)rv;
 }
@@ -150,6 +155,8 @@ static VALUE nogvl_sendfile(void *data)
 	size_t w = count_max(args->count);
 
 	rv = sendfile(args->out, args->in, &args->off, w);
+	if (rv == 0)
+		args->eof = 1;
 	if (rv > 0)
 		args->count -= rv;
 
@@ -167,10 +174,15 @@ static off_t sendfile_full(struct sendfile_args *args)
 		                                        RUBY_UBF_IO, NULL);
 		if (!args->count)
 			break;
+		if (args->eof) {
+			if (all != args->count)
+				break;
+			rb_eof_error();
+		}
 		if (rv < 0 && ! rb_io_wait_writable(args->out))
 			rb_sys_fail("sendfile");
 	}
-	return all;
+	return all - args->count;
 }
 
 static off_t sendfile_nonblock(struct sendfile_args *args)
@@ -191,6 +203,8 @@ static off_t sendfile_nonblock(struct sendfile_args *args)
 	                                        RUBY_UBF_IO, NULL);
 	if (rv < 0)
 		rb_sys_fail("sendfile");
+	if (args->eof)
+		rb_eof_error();
 
 	return before - args->count;
 }
@@ -205,6 +219,7 @@ static void convert_args(int argc, VALUE *argv, VALUE self,
 	in = rb_convert_type(in, T_FILE, "IO", "to_io");
 	args->out = my_rb_fileno(self);
 	args->in = my_rb_fileno(in);
+	args->eof = 0;
 
 	/* determine offset and count parameters */
 	args->off = (NIL_P(offset)) ? 0 : NUM2OFFT(offset);

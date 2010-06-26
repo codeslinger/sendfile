@@ -198,5 +198,30 @@ class TestSendfile < Test::Unit::TestCase
 	def test_invalid_file
 		assert_raises(TypeError) { __do_sendfile(:hello) }
 	end
+
+	def test_sendfile_too_big_eof
+		sent = read = nil
+		count = @small_data.size * 2
+		s = TCPSocket.new @host, @port
+		sent = s.sendfile @small, nil, count
+		assert_raises(EOFError) do
+			s.sendfile @small, sent, 1
+		end
+		s.close
+		len = @rd.read( 4).unpack( "N")[0]
+		read = @rd.read len
+		assert_equal @small_data.size, sent
+		assert_equal @small_data.size, read.size
+		assert_equal @small_data, read
+	end
+
+	def test_sendfile_nonblock_eof
+		s = TCPSocket.new @host, @port
+		off = @small_data.size
+		assert_raises(EOFError) do
+			s.sendfile_nonblock @small, off, 1
+		end
+		s.close
+	end
 end		# class TestSendfile
 
