@@ -170,5 +170,19 @@ class TestSendfile < Test::Unit::TestCase
 		assert_equal data.size, read.size
 		assert_equal data, read
 	end
+
+	def test_sendfile_nonblock
+		c, s = UNIXSocket.pair
+		nr_sent = 0
+		assert_raises(Errno::EAGAIN) do
+			loop do
+				nr_sent += c.sendfile_nonblock @small
+			end
+		end
+		c.close
+		nr_read = s.read.size
+		s.close
+		assert_equal nr_read, nr_sent
+	end
 end		# class TestSendfile
 

@@ -39,6 +39,8 @@
 #else
 #  include "rubyio.h"
 #endif
+#include <unistd.h>
+#include <fcntl.h>
 #include "config.h"
 
 #ifndef HAVE_RB_THREAD_BLOCKING_REGION
@@ -146,6 +148,28 @@ static off_t sendfile_full(struct sendfile_args *args)
 	return all;
 }
 
+static size_t sendfile_nonblock(struct sendfile_args *args)
+{
+	ssize_t rv;
+	size_t before = args->count;
+	int flags;
+
+	flags = fcntl(args->out, F_GETFL);
+	if (flags == -1)
+		rb_sys_fail("fcntl");
+	if ((flags & O_NONBLOCK) == 0) {
+		if (fcntl(args->out, F_SETFL, flags | O_NONBLOCK) == -1)
+			rb_sys_fail("fcntl");
+	}
+
+	rv = (ssize_t)rb_thread_blocking_region(nogvl_sendfile, args,
+	                                        RUBY_UBF_IO, NULL);
+	if (rv < 0)
+		rb_sys_fail("sendfile");
+
+	return before - args->count;
+}
+
 static void convert_args(int argc, VALUE *argv, VALUE self,
                          struct sendfile_args *args)
 {
@@ -199,11 +223,41 @@ static VALUE rb_io_sendfile(int argc, VALUE *argv, VALUE self)
 	return OFFT2NUM(sendfile_full(&args));
 }
 
+/* call-seq:
+ *	writeIO.sendfile_nonblock(readIO, offset=0, count=nil) => integer
+ *
+ * Transfers count bytes starting at offset from readIO directly to writeIO
+ * without copying (i.e. invoking the kernel to do it for you).
+ *
+ * Unlike IO#sendfile, this will set the O_NONBLOCK flag on writeIO
+ * before calling sendfile(2) and will raise Errno::EAGAIN instead
+ * of blocking.  This method is intended for use with non-blocking
+ * event frameworks, including those that rely on Fibers.
+ *
+ * If offset is omitted, transfer starts at the beginning of the file.
+ *
+ * If count is omitted, the full length of the file will be sent.
+ *
+ * Returns the number of bytes sent on success. Will throw system error
+ * exception on error. (check man sendfile(2) on your platform for
+ * information on what errors could result and how to handle them)
+ */
+static VALUE rb_io_sendfile_nonblock(int argc, VALUE *argv, VALUE self)
+{
+	struct sendfile_args args;
+
+	convert_args(argc, argv, self, &args);
+
+	return SIZET2NUM(sendfile_nonblock(&args));
+}
+
 /* Interface to the UNIX sendfile(2) system call. Should work on FreeBSD,
  * Linux and Solaris systems that support the sendfile(2) system call.
  */
 void Init_sendfile(void)
 {
 	rb_define_method(rb_cIO, "sendfile", rb_io_sendfile, -1);
+	rb_define_method(rb_cIO, "sendfile_nonblock",
+	                 rb_io_sendfile_nonblock, -1);
 }
 
