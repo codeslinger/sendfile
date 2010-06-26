@@ -76,7 +76,7 @@ struct sendfile_args {
 	int out;
 	int in;
 	off_t off;
-	size_t count;
+	off_t count;
 };
 
 #if ! HAVE_RB_IO_T
@@ -116,22 +116,6 @@ static VALUE nogvl_sendfile(void *data)
 
 	return (VALUE)rv;
 }
-
-static off_t __sendfile(struct sendfile_args *args)
-{
-	int rv;
-	off_t initial = args->off;
-
-	while (1) {
-		rv = (int)rb_thread_blocking_region(nogvl_sendfile, args,
-		                                    RUBY_UBF_IO, NULL);
-		if (!rv)
-			break;
-		if (rv < 0 && ! rb_io_wait_writable(out))
-			rb_sys_fail("sendfile");
-	}
-	return args->off - initial;
-}
 #else
 static VALUE nogvl_sendfile(void *data)
 {
@@ -144,10 +128,12 @@ static VALUE nogvl_sendfile(void *data)
 
 	return (VALUE)rv;
 }
+#endif
 
-static size_t __sendfile(struct sendfile_args *args)
+static off_t sendfile_full(struct sendfile_args *args)
 {
-	ssize_t rv, all = args->count;
+	ssize_t rv;
+	off_t all = args->count;
 
 	while (1) {
 		rv = (ssize_t)rb_thread_blocking_region(nogvl_sendfile, args,
@@ -159,7 +145,6 @@ static size_t __sendfile(struct sendfile_args *args)
 	}
 	return all;
 }
-#endif
 
 /* call-seq:
  * 	writeIO.sendfile( readIO, offset=0, count=nil) => integer
@@ -204,7 +189,7 @@ static VALUE rb_io_sendfile(int argc, VALUE *argv, VALUE self)
 	}
 
 	/* now send the file */
-	return INT2FIX(__sendfile(&args));
+	return OFFT2NUM(sendfile_full(&args));
 }
 
 /* Interface to the UNIX sendfile(2) system call. Should work on FreeBSD,
