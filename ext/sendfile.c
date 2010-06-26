@@ -146,47 +146,54 @@ static off_t sendfile_full(struct sendfile_args *args)
 	return all;
 }
 
-/* call-seq:
- * 	writeIO.sendfile( readIO, offset=0, count=nil) => integer
- * 
- * Transfers count bytes starting at offset from readIO directly to writeIO
- * without copying (i.e. invoking the kernel to do it for you).
- * 
- * If offset is omitted, transfer starts at the beginning of the file. 
- *
- * If count is omitted, the full length of the file will be sent. 
- *
- * Returns the number of bytes sent on success. Will throw system error
- * exception on error. (check man sendfile(2) on your platform for 
- * information on what errors could result and how to handle them)
- */
-static VALUE rb_io_sendfile(int argc, VALUE *argv, VALUE self)
+static void convert_args(int argc, VALUE *argv, VALUE self,
+                         struct sendfile_args *args)
 {
-	struct sendfile_args args;
 	VALUE in, offset, count;
 
 	/* get fds for files involved to pass to sendfile(2) */
 	rb_scan_args(argc, argv, "12", &in, &offset, &count);
 	if (TYPE(in) != T_FILE)
 		rb_raise(rb_eArgError, "invalid first argument\n");
-	args.out = my_rb_fileno(self);
-	args.in = my_rb_fileno(in);
+	args->out = my_rb_fileno(self);
+	args->in = my_rb_fileno(in);
 
 	/* determine offset and count parameters */
-	args.off = (NIL_P(offset)) ? 0 : NUM2ULONG(offset);
+	args->off = (NIL_P(offset)) ? 0 : NUM2ULONG(offset);
 	if (NIL_P(count)) {
 		/* FreeBSD's sendfile() can take 0 as an indication to send
 		 * until end of file, but Linux and Solaris can't, and anyway 
 		 * we need the file size to ensure we send it all in the case
 		 * of a non-blocking fd */
 		struct stat s;
-		if (fstat(args.in, &s) == -1)
+		if (fstat(args->in, &s) == -1)
 			rb_sys_fail("sendfile");
-		args.count = s.st_size;
-		args.count -= args.off;
+		args->count = s.st_size;
+		args->count -= args->off;
 	} else {
-		args.count = NUM2ULONG(count);
+		args->count = NUM2ULONG(count);
 	}
+}
+
+/* call-seq:
+ *	writeIO.sendfile( readIO, offset=0, count=nil) => integer
+ *
+ * Transfers count bytes starting at offset from readIO directly to writeIO
+ * without copying (i.e. invoking the kernel to do it for you).
+ *
+ * If offset is omitted, transfer starts at the beginning of the file.
+ *
+ * If count is omitted, the full length of the file will be sent.
+ *
+ * Returns the number of bytes sent on success. Will throw system error
+ * exception on error. (check man sendfile(2) on your platform for
+ * information on what errors could result and how to handle them)
+ */
+static VALUE rb_io_sendfile(int argc, VALUE *argv, VALUE self)
+{
+	struct sendfile_args args;
+
+	convert_args(argc, argv, self, &args);
 
 	/* now send the file */
 	return OFFT2NUM(sendfile_full(&args));
