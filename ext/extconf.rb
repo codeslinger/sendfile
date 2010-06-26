@@ -49,5 +49,6 @@ f.print <<EOF
 EOF
 end
 
+have_func('rb_thread_blocking_region')
 create_makefile( "sendfile")
 

@@ -34,9 +34,33 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include "ruby.h"
-#include "rubyio.h"
-#include "rubysig.h"
+#ifdef HAVE_RUBY_IO_H
+#  include "ruby/io.h"
+#else
+#  include "rubyio.h"
+#endif
 #include "config.h"
+
+#ifndef HAVE_RB_THREAD_BLOCKING_REGION
+/* (very) partial emulation of the 1.9 rb_thread_blocking_region under 1.8 */
+#  include <rubysig.h>
+#  define RUBY_UBF_IO ((rb_unblock_function_t *)-1)
+typedef void rb_unblock_function_t(void *);
+typedef VALUE rb_blocking_function_t(void *);
+static VALUE
+rb_thread_blocking_region(
+	rb_blocking_function_t *fn, void *data1,
+	rb_unblock_function_t *ubf, void *data2)
+{
+	VALUE rv;
+
+	TRAP_BEG;
+	rv = fn(data1);
+	TRAP_END;
+
+	return rv;
+}
+#endif /* ! HAVE_RB_THREAD_BLOCKING_REGION */
 
 #if defined(RUBY_PLATFORM_FREEBSD)
 # include <sys/socket.h>
@@ -47,6 +71,13 @@
 #elif defined(RUBY_PLATFORM_SOLARIS)
 # include <sys/sendfile.h>
 #endif
+
+struct sendfile_args {
+	int out;
+	int in;
+	off_t off;
+	size_t count;
+};
 
 #if ! HAVE_RB_IO_T
 #  define rb_io_t OpenFile
@@ -72,41 +103,61 @@ static int my_rb_fileno(VALUE io)
 }
 
 #if defined(RUBY_PLATFORM_FREEBSD)
-static off_t __sendfile(int out, int in, off_t off, size_t count)
+static VALUE nogvl_sendfile(void *data)
+{
+	struct sendfile_args *args = data;
+	int rv;
+	off_t written;
+
+	rv = sendfile(args->in, args->out, args->off, args->count,
+	              NULL, &written, 0);
+	args->off += written;
+	args->count -= written;
+
+	return (VALUE)rv;
+}
+
+static off_t __sendfile(struct sendfile_args *args)
 {
 	int rv;
-	off_t written, initial = off;
+	off_t initial = args->off;
 
 	while (1) {
-		TRAP_BEG;
-		rv = sendfile(in, out, off, count, NULL, &written, 0);
-		TRAP_END;
-		off += written;
-		count -= written;
+		rv = (int)rb_thread_blocking_region(nogvl_sendfile, args,
+		                                    RUBY_UBF_IO, NULL);
 		if (!rv)
 			break;
 		if (rv < 0 && ! rb_io_wait_writable(out))
 			rb_sys_fail("sendfile");
 	}
-	return off - initial;
+	return args->off - initial;
 }
 #else
-static size_t __sendfile(int out, int in, off_t off, size_t count)
+static VALUE nogvl_sendfile(void *data)
 {
-	ssize_t rv, remaining = count;
-	
+	ssize_t rv;
+	struct sendfile_args *args = data;
+
+	rv = sendfile(args->out, args->in, &args->off, args->count);
+	if (rv > 0)
+		args->count -= rv;
+
+	return (VALUE)rv;
+}
+
+static size_t __sendfile(struct sendfile_args *args)
+{
+	ssize_t rv, all = args->count;
+
 	while (1) {
-		TRAP_BEG;
-		rv = sendfile(out, in, &off, remaining);
-		TRAP_END;
-		if (rv > 0)
-			remaining -= rv;
-		if (!remaining)
+		rv = (ssize_t)rb_thread_blocking_region(nogvl_sendfile, args,
+		                                        RUBY_UBF_IO, NULL);
+		if (!args->count)
 			break;
-		if (rv < 0 && ! rb_io_wait_writable(out))
+		if (rv < 0 && ! rb_io_wait_writable(args->out))
 			rb_sys_fail("sendfile");
 	}
-	return count;
+	return all;
 }
 #endif
 
@@ -126,36 +177,34 @@ static size_t __sendfile(int out, int in, off_t off, size_t count)
  */
 static VALUE rb_io_sendfile(int argc, VALUE *argv, VALUE self)
 {
-	int i, o;
-	size_t c;
-	off_t off;
+	struct sendfile_args args;
 	VALUE in, offset, count;
 
 	/* get fds for files involved to pass to sendfile(2) */
 	rb_scan_args(argc, argv, "12", &in, &offset, &count);
 	if (TYPE(in) != T_FILE)
 		rb_raise(rb_eArgError, "invalid first argument\n");
-	o = my_rb_fileno(self);
-	i = my_rb_fileno(in);
+	args.out = my_rb_fileno(self);
+	args.in = my_rb_fileno(in);
 
 	/* determine offset and count parameters */
-	off = (NIL_P(offset)) ? 0 : NUM2ULONG(offset);
+	args.off = (NIL_P(offset)) ? 0 : NUM2ULONG(offset);
 	if (NIL_P(count)) {
 		/* FreeBSD's sendfile() can take 0 as an indication to send
 		 * until end of file, but Linux and Solaris can't, and anyway 
 		 * we need the file size to ensure we send it all in the case
 		 * of a non-blocking fd */
 		struct stat s;
-		if (fstat(i, &s) == -1)
+		if (fstat(args.in, &s) == -1)
 			rb_sys_fail("sendfile");
-		c = s.st_size;
-		c -= off;
+		args.count = s.st_size;
+		args.count -= args.off;
 	} else {
-		c = NUM2ULONG(count);
+		args.count = NUM2ULONG(count);
 	}
 
 	/* now send the file */
-	return INT2FIX(__sendfile(o, i, off, c));
+	return INT2FIX(__sendfile(&args));
 }
 
 /* Interface to the UNIX sendfile(2) system call. Should work on FreeBSD,
