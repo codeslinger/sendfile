@@ -33,6 +33,7 @@
  */
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <limits.h>
 #include "ruby.h"
 #ifdef HAVE_RUBY_IO_H
 #  include "ruby/io.h"
@@ -74,6 +75,13 @@ rb_thread_blocking_region(
 # include <sys/sendfile.h>
 #endif
 
+#define MAX_SEND_SIZE ((off_t)LONG_MAX)
+
+static size_t count_max(off_t count)
+{
+	return (size_t)(count > MAX_SEND_SIZE ? MAX_SEND_SIZE : count);
+}
+
 struct sendfile_args {
 	int out;
 	int in;
@@ -110,6 +118,7 @@ static VALUE nogvl_sendfile(void *data)
 	struct sendfile_args *args = data;
 	int rv;
 	off_t written;
+	size_t w = count_max(args->count);
 
 	rv = sendfile(args->in, args->out, args->off, args->count,
 	              NULL, &written, 0);
@@ -123,8 +132,9 @@ static VALUE nogvl_sendfile(void *data)
 {
 	ssize_t rv;
 	struct sendfile_args *args = data;
+	size_t w = count_max(args->count);
 
-	rv = sendfile(args->out, args->in, &args->off, args->count);
+	rv = sendfile(args->out, args->in, &args->off, w);
 	if (rv > 0)
 		args->count -= rv;
 
@@ -148,10 +158,10 @@ static off_t sendfile_full(struct sendfile_args *args)
 	return all;
 }
 
-static size_t sendfile_nonblock(struct sendfile_args *args)
+static off_t sendfile_nonblock(struct sendfile_args *args)
 {
 	ssize_t rv;
-	size_t before = args->count;
+	off_t before = args->count;
 	int flags;
 
 	flags = fcntl(args->out, F_GETFL);
@@ -182,7 +192,7 @@ static void convert_args(int argc, VALUE *argv, VALUE self,
 	args->in = my_rb_fileno(in);
 
 	/* determine offset and count parameters */
-	args->off = (NIL_P(offset)) ? 0 : NUM2ULONG(offset);
+	args->off = (NIL_P(offset)) ? 0 : NUM2OFFT(offset);
 	if (NIL_P(count)) {
 		/* FreeBSD's sendfile() can take 0 as an indication to send
 		 * until end of file, but Linux and Solaris can't, and anyway 
@@ -194,7 +204,7 @@ static void convert_args(int argc, VALUE *argv, VALUE self,
 		args->count = s.st_size;
 		args->count -= args->off;
 	} else {
-		args->count = NUM2ULONG(count);
+		args->count = NUM2OFFT(count);
 	}
 }
 
@@ -247,7 +257,7 @@ static VALUE rb_io_sendfile_nonblock(int argc, VALUE *argv, VALUE self)
 
 	convert_args(argc, argv, self, &args);
 
-	return SIZET2NUM(sendfile_nonblock(&args));
+	return OFFT2NUM(sendfile_nonblock(&args));
 }
 
 /* Interface to the UNIX sendfile(2) system call. Should work on FreeBSD,
