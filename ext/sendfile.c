@@ -48,6 +48,29 @@
 # include <sys/sendfile.h>
 #endif
 
+#if ! HAVE_RB_IO_T
+#  define rb_io_t OpenFile
+#endif
+
+#ifdef GetReadFile
+#  define FPTR_TO_FD(fptr) (fileno(GetReadFile(fptr)))
+#else
+#  if !HAVE_RB_IO_T || (RUBY_VERSION_MAJOR == 1 && RUBY_VERSION_MINOR == 8)
+#    define FPTR_TO_FD(fptr) fileno(fptr->f)
+#  else
+#    define FPTR_TO_FD(fptr) fptr->fd
+#  endif
+#endif
+
+static int my_rb_fileno(VALUE io)
+{
+	rb_io_t *fptr;
+
+	GetOpenFile(io, fptr);
+
+	return FPTR_TO_FD(fptr);
+}
+
 #if defined(RUBY_PLATFORM_FREEBSD)
 static off_t __sendfile(int out, int in, off_t off, size_t count)
 {
@@ -106,17 +129,14 @@ static VALUE rb_io_sendfile(int argc, VALUE *argv, VALUE self)
 	int i, o;
 	size_t c;
 	off_t off;
-	OpenFile *iptr, *optr;
 	VALUE in, offset, count;
 
 	/* get fds for files involved to pass to sendfile(2) */
 	rb_scan_args(argc, argv, "12", &in, &offset, &count);
 	if (TYPE(in) != T_FILE)
 		rb_raise(rb_eArgError, "invalid first argument\n");
-	GetOpenFile(self, optr);
-	GetOpenFile(in, iptr);
-	o = fileno(optr->f);
-	i = fileno(iptr->f);
+	o = my_rb_fileno(self);
+	i = my_rb_fileno(in);
 
 	/* determine offset and count parameters */
 	off = (NIL_P(offset)) ? 0 : NUM2ULONG(offset);
