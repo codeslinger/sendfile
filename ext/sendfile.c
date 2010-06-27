@@ -45,6 +45,15 @@
 #include "config.h"
 
 #ifndef HAVE_RB_THREAD_BLOCKING_REGION
+/*
+ * For non-natively threaded interpreters, do not monopolize the
+ * process and send in smaller chunks.  64K was chosen as it is
+ * half the typical max readahead size in Linux 2.6, giving the
+ * kernel some time to populate the page cache in between
+ * subsequent sendfile() calls.
+ */
+#  define MAX_SEND_SIZE ((off_t)(0x10000))
+
 /* (very) partial emulation of the 1.9 rb_thread_blocking_region under 1.8 */
 #  include <rubysig.h>
 #  define RUBY_UBF_IO ((rb_unblock_function_t *)-1)
@@ -63,6 +72,14 @@ rb_thread_blocking_region(
 
 	return rv;
 }
+#else
+/*
+ * We can release the GVL and block as long as we need to.
+ * Limit this to the maximum ssize_t anyways, since 32-bit machines with
+ * Large File Support can't send more than this number of bytes
+ * in one shot.
+ */
+#  define MAX_SEND_SIZE ((off_t)LONG_MAX)
 #endif /* ! HAVE_RB_THREAD_BLOCKING_REGION */
 
 #if defined(RUBY_PLATFORM_FREEBSD)
@@ -74,8 +91,6 @@ rb_thread_blocking_region(
 #elif defined(RUBY_PLATFORM_SOLARIS)
 # include <sys/sendfile.h>
 #endif
-
-#define MAX_SEND_SIZE ((off_t)LONG_MAX)
 
 static size_t count_max(off_t count)
 {
