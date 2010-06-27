@@ -1,5 +1,5 @@
 FILES
-README
+README.textile
 LICENSE
 ChangeLog
 ext/extconf.rb
