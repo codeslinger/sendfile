@@ -185,6 +185,26 @@ class TestSendfile < Test::Unit::TestCase
 		assert_equal nr_read, nr_sent
 	end
 
+	def test_trysendfile
+		c, s = UNIXSocket.pair
+		nr_sent = 0
+		assert_nothing_raised do
+			case rv = c.trysendfile(@small)
+			when :wait_writable
+				break
+			when Integer
+				nr_sent += rv
+			else
+				raise "Unexpected return: #{rv.inspect}"
+			end while true
+		end
+		assert nr_sent > 0, "nr_sent: #{nr_sent} <= 0"
+		c.close
+		nr_read = s.read.size
+		s.close
+		assert_equal nr_read, nr_sent
+	end
+
 	def test_tempfile
 		tmp = Tempfile.new ''
 		tmp.write @small_data
@@ -221,6 +241,13 @@ class TestSendfile < Test::Unit::TestCase
 		assert_raises(EOFError) do
 			s.sendfile_nonblock @small, off, 1
 		end
+		s.close
+	end
+
+	def test_trysendfile_eof
+		s = TCPSocket.new @host, @port
+		off = @small_data.size
+		assert_nil s.trysendfile(@small, off, 1)
 		s.close
 	end
 end		# class TestSendfile

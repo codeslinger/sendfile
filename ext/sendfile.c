@@ -43,6 +43,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include "config.h"
+static VALUE sym_wait_writable;
 
 #ifndef HAVE_RB_THREAD_BLOCKING_REGION
 /*
@@ -185,7 +186,7 @@ static off_t sendfile_full(struct sendfile_args *args)
 	return all - args->count;
 }
 
-static off_t sendfile_nonblock(struct sendfile_args *args)
+static VALUE sendfile_nonblock(struct sendfile_args *args, int try)
 {
 	ssize_t rv;
 	off_t before = args->count;
@@ -201,12 +202,18 @@ static off_t sendfile_nonblock(struct sendfile_args *args)
 
 	rv = (ssize_t)rb_thread_blocking_region(nogvl_sendfile, args,
 	                                        RUBY_UBF_IO, NULL);
-	if (rv < 0)
+	if (rv < 0) {
+		if (try && errno == EAGAIN)
+			return sym_wait_writable;
 		rb_sys_fail("sendfile");
-	if (args->eof)
+	}
+	if (args->eof) {
+		if (try)
+			return Qnil;
 		rb_eof_error();
+	}
 
-	return before - args->count;
+	return OFFT2NUM(before - args->count);
 }
 
 static void convert_args(int argc, VALUE *argv, VALUE self,
@@ -287,7 +294,40 @@ static VALUE rb_io_sendfile_nonblock(int argc, VALUE *argv, VALUE self)
 
 	convert_args(argc, argv, self, &args);
 
-	return OFFT2NUM(sendfile_nonblock(&args));
+	return sendfile_nonblock(&args, 0);
+}
+
+/* call-seq:
+ *	writeIO.trysendfile(readIO, offset=0, count=nil) => integer, nil, or
+ *	                                                    :wait_writable
+ *
+ * Transfers count bytes starting at offset from readIO directly to writeIO
+ * without copying (i.e. invoking the kernel to do it for you).
+ *
+ * Unlike IO#sendfile, this will set the O_NONBLOCK flag on writeIO
+ * before calling sendfile(2) and will return :wait_writable instead
+ * of blocking.  This method is intended for use with non-blocking
+ * event frameworks, including those that rely on Fibers.
+ *
+ * If offset is omitted, transfer starts at the beginning of the file.
+ *
+ * If count is omitted, the full length of the file will be sent.
+ *
+ * Returns the number of bytes sent on success, nil on EOF, and
+ * :wait_writable on EAGAIN.  Will throw system error exception on error.
+ * (check man sendfile(2) on your platform for
+ * information on what errors could result and how to handle them)
+ *
+ * This method is a faster alternative to sendfile_nonblock as it does
+ * not raise exceptions on common EAGAIN errors.
+ */
+static VALUE rb_io_trysendfile(int argc, VALUE *argv, VALUE self)
+{
+	struct sendfile_args args;
+
+	convert_args(argc, argv, self, &args);
+
+	return sendfile_nonblock(&args, 1);
 }
 
 /* Interface to the UNIX sendfile(2) system call. Should work on FreeBSD,
@@ -295,8 +335,10 @@ static VALUE rb_io_sendfile_nonblock(int argc, VALUE *argv, VALUE self)
  */
 void Init_sendfile(void)
 {
+	sym_wait_writable = ID2SYM(rb_intern("wait_writable"));
 	rb_define_method(rb_cIO, "sendfile", rb_io_sendfile, -1);
 	rb_define_method(rb_cIO, "sendfile_nonblock",
 	                 rb_io_sendfile_nonblock, -1);
+	rb_define_method(rb_cIO, "trysendfile", rb_io_trysendfile, -1);
 }
 
