@@ -21,7 +21,7 @@ h2. Usage
 
 Here's a small example of a use of <code>IO#sendfile</code>.
 
-bc..  require 'socket'
+bc.. require 'socket'
 require 'rubygems'
 require 'sendfile'
 s = TCPSocket.new 'yourdomain.com', 5000
