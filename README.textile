@@ -21,15 +21,13 @@ h2. Usage
 
 Here's a small example of a use of <code>IO#sendfile</code>.
 
-<code>
-  require 'socket'
-  require 'rubygems'
-  require 'sendfile'
-  s = TCPSocket.new 'yourdomain.com', 5000
-  File.open 'somefile.txt' { |f| s.sendfile f }
-  s.close
-</code>
+bc..  require 'socket'
+require 'rubygems'
+require 'sendfile'
+s = TCPSocket.new 'yourdomain.com', 5000
+File.open 'somefile.txt' { |f| s.sendfile f }
+s.close
 
-See the test scripts for more examples on how to use this 
+p. See the test scripts for more examples on how to use this 
 module.
 
