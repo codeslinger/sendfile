@@ -1,15 +1,10 @@
 h1. Ruby sendfile(2) Interface
 
-This module allows Ruby programs to access their OS's native
-<code>sendfile(2)</code> system call from any IO object. Your kernel must
-export a recognized signature for the <code>sendfile(2)</code> system call
-to use this module. Currently, that includes Linux, Solaris
-and FreeBSD.
+This module allows Ruby programs to access their OS's native <code>sendfile(2)</code> system call from any IO object. Your kernel must export a recognized signature for the <code>sendfile(2)</code> system call to use this module. Currently, that includes Linux, Solaris and FreeBSD.
 
 h2. Installation
 
-Download and install the latest package from the rubyforge.org
-RubyGems repository.
+Download and install the latest package from the rubyforge.org RubyGems repository.
 
 <code>
   $ gem install sendfile 
@@ -28,6 +23,5 @@ s = TCPSocket.new 'yourdomain.com', 5000
 File.open 'somefile.txt' { |f| s.sendfile f }
 s.close
 
-p. See the test scripts for more examples on how to use this 
-module.
+p. See the test scripts for more examples on how to use this module.
 
