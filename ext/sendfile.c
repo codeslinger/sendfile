@@ -3,22 +3,22 @@
  *
  * Copyright (c) 2005,2008 Tobias DiPasquale
  *
- * Permission is hereby granted, free of charge, to any person obtaining a 
+ * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
  * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense, 
- * and/or sell copies of the Software, and to permit persons to whom the 
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
  * Software is furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included 
+ * The above copyright notice and this permission notice shall be included
  * in all copies or substantial portions of the Software.
  *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
  * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL 
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  *
  * ------------------------------------------------------------------------
@@ -91,6 +91,10 @@ rb_thread_blocking_region(
 # include <unistd.h>
 #elif defined(RUBY_PLATFORM_SOLARIS)
 # include <sys/sendfile.h>
+#elif defined(RUBY_PLATFORM_DARWIN)
+# include <sys/types.h>
+# include <sys/socket.h>
+# include <sys/uio.h>
 #endif
 
 static size_t count_max(off_t count)
@@ -138,13 +142,30 @@ static VALUE nogvl_sendfile(void *data)
 	size_t w = count_max(args->count);
 
 	rv = sendfile(args->in, args->out, args->off, args->count,
-	              NULL, &written, 0);
+				  NULL, &written, 0);
 	if (written == 0 && rv == 0) {
 		args->eof = 1;
 	} else {
 		args->off += written;
 		args->count -= written;
 	}
+
+	return (VALUE)rv;
+}
+#elif defined(RUBY_PLATFORM_DARWIN)
+static VALUE nogvl_sendfile(void *data)
+{
+	struct sendfile_args *args = data;
+	int rv;
+	off_t written;
+	size_t w = count_max(args->count);
+
+	rv = sendfile(args->in, args->out, args->off, args->count,
+				  NULL, 0);
+	if (rv == 0)
+		args->eof = 1;
+	if (rv > 0)
+		args->count -= rv;
 
 	return (VALUE)rv;
 }
@@ -172,7 +193,7 @@ static off_t sendfile_full(struct sendfile_args *args)
 
 	while (1) {
 		rv = (ssize_t)rb_thread_blocking_region(nogvl_sendfile, args,
-		                                        RUBY_UBF_IO, NULL);
+												RUBY_UBF_IO, NULL);
 		if (!args->count)
 			break;
 		if (args->eof) {
@@ -201,7 +222,7 @@ static VALUE sendfile_nonblock(struct sendfile_args *args, int try)
 	}
 
 	rv = (ssize_t)rb_thread_blocking_region(nogvl_sendfile, args,
-	                                        RUBY_UBF_IO, NULL);
+											RUBY_UBF_IO, NULL);
 	if (rv < 0) {
 		if (try && errno == EAGAIN)
 			return sym_wait_writable;
@@ -217,7 +238,7 @@ static VALUE sendfile_nonblock(struct sendfile_args *args, int try)
 }
 
 static void convert_args(int argc, VALUE *argv, VALUE self,
-                         struct sendfile_args *args)
+						 struct sendfile_args *args)
 {
 	VALUE in, offset, count;
 
@@ -232,7 +253,7 @@ static void convert_args(int argc, VALUE *argv, VALUE self,
 	args->off = (NIL_P(offset)) ? 0 : NUM2OFFT(offset);
 	if (NIL_P(count)) {
 		/* FreeBSD's sendfile() can take 0 as an indication to send
-		 * until end of file, but Linux and Solaris can't, and anyway 
+		 * until end of file, but Linux and Solaris can't, and anyway
 		 * we need the file size to ensure we send it all in the case
 		 * of a non-blocking fd */
 		struct stat s;
@@ -299,7 +320,7 @@ static VALUE rb_io_sendfile_nonblock(int argc, VALUE *argv, VALUE self)
 
 /* call-seq:
  *	writeIO.trysendfile(readIO, offset=0, count=nil) => integer, nil, or
- *	                                                    :wait_writable
+ *														:wait_writable
  *
  * Transfers count bytes starting at offset from readIO directly to writeIO
  * without copying (i.e. invoking the kernel to do it for you).
@@ -338,7 +359,6 @@ void Init_sendfile(void)
 	sym_wait_writable = ID2SYM(rb_intern("wait_writable"));
 	rb_define_method(rb_cIO, "sendfile", rb_io_sendfile, -1);
 	rb_define_method(rb_cIO, "sendfile_nonblock",
-	                 rb_io_sendfile_nonblock, -1);
+					 rb_io_sendfile_nonblock, -1);
 	rb_define_method(rb_cIO, "trysendfile", rb_io_trysendfile, -1);
 }
-
