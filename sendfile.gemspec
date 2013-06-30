@@ -2,11 +2,11 @@
 
 spec = Gem::Specification.new do |gs|
 	gs.name = 'sendfile'
-	gs.version = '1.1.1'
+	gs.version = '1.2.0'
 	gs.summary = 'Ruby interface to sendfile(2) system call'
 	gs.description = <<-EOF
 Allows Ruby programs to access sendfile(2) functionality on 
-any IO object. Works on Linux, Solaris and FreeBSD with 
+any IO object. Works on Linux, Solaris, FreeBSD and Darwin with
 blocking and non-blocking sockets.
 EOF
 	gs.author = 'Toby DiPasquale'
