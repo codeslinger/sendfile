@@ -157,15 +157,16 @@ static VALUE nogvl_sendfile(void *data)
 {
 	struct sendfile_args *args = data;
 	int rv;
-	off_t written;
-	size_t w = count_max(args->count);
+	off_t written = args->count;
 
-	rv = sendfile(args->in, args->out, args->off, args->count,
+	rv = sendfile(args->in, args->out, args->off, &written,
 				  NULL, 0);
-	if (rv == 0)
+	if (written == 0 && rv == 0) {
 		args->eof = 1;
-	if (rv > 0)
-		args->count -= rv;
+	} else {
+		args->off += written;
+		args->count -= written;
+	}
 
 	return (VALUE)rv;
 }
