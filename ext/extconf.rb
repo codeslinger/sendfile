@@ -52,5 +52,7 @@ f.print <<EOF
 EOF
 end
 
-have_func('rb_thread_blocking_region')
+unless have_func('rb_thread_call_without_gvl', 'ruby/thread.h')
+  have_func('rb_thread_blocking_region')
+end
 create_makefile( "sendfile")

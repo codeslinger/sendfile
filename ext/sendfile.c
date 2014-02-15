@@ -45,7 +45,17 @@
 #include "config.h"
 static VALUE sym_wait_writable;
 
-#ifndef HAVE_RB_THREAD_BLOCKING_REGION
+#if defined(HAVE_RB_THREAD_CALL_WITHOUT_GVL) && defined(HAVE_RUBY_THREAD_H)
+/* Ruby 2.0+ */
+#  include <ruby/thread.h>
+typedef void * (*my_blocking_fn_t)(void*);
+#  define WITHOUT_GVL(fn,a) \
+	rb_thread_call_without_gvl((my_blocking_fn_t)(fn),(a),RUBY_UBF_IO,0)
+#elif defined(HAVE_RB_THREAD_BLOCKING_REGION) /* Ruby 1.9 */
+typedef VALUE (*my_blocking_fn_t)(void*);
+#  define WITHOUT_GVL(fn,a) \
+	rb_thread_blocking_region((my_blocking_fn_t)(fn),(a),RUBY_UBF_IO,0)
+#else /* MRI 1.8 threads */
 /*
  * For non-natively threaded interpreters, do not monopolize the
  * process and send in smaller chunks.  64K was chosen as it is
@@ -57,13 +67,9 @@ static VALUE sym_wait_writable;
 
 /* (very) partial emulation of the 1.9 rb_thread_blocking_region under 1.8 */
 #  include <rubysig.h>
-#  define RUBY_UBF_IO ((rb_unblock_function_t *)-1)
-typedef void rb_unblock_function_t(void *);
 typedef VALUE rb_blocking_function_t(void *);
 static VALUE
-rb_thread_blocking_region(
-	rb_blocking_function_t *fn, void *data1,
-	rb_unblock_function_t *ubf, void *data2)
+WITHOUT_GVL(rb_blocking_function_t *fn, void *data1)
 {
 	VALUE rv;
 
@@ -73,7 +79,9 @@ rb_thread_blocking_region(
 
 	return rv;
 }
-#else
+#endif /* WITHOUT_GVL definitions */
+
+#ifndef MAX_SEND_SIZE
 /*
  * We can release the GVL and block as long as we need to.
  * Limit this to the maximum ssize_t anyways, since 32-bit machines with
@@ -193,8 +201,7 @@ static off_t sendfile_full(struct sendfile_args *args)
 	off_t all = args->count;
 
 	while (1) {
-		rv = (ssize_t)rb_thread_blocking_region(nogvl_sendfile, args,
-												RUBY_UBF_IO, NULL);
+		rv = (ssize_t)WITHOUT_GVL(nogvl_sendfile, args);
 		if (!args->count)
 			break;
 		if (args->eof) {
@@ -222,8 +229,7 @@ static VALUE sendfile_nonblock(struct sendfile_args *args, int try)
 			rb_sys_fail("fcntl");
 	}
 
-	rv = (ssize_t)rb_thread_blocking_region(nogvl_sendfile, args,
-											RUBY_UBF_IO, NULL);
+	rv = (ssize_t)WITHOUT_GVL(nogvl_sendfile, args);
 	if (rv < 0) {
 		if (try && errno == EAGAIN)
 			return sym_wait_writable;
