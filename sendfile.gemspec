@@ -12,11 +12,9 @@ EOF
 	gs.author = 'Toby DiPasquale'
 	gs.email = 'toby@cbcg.net'
 	gs.homepage = 'https://github.com/codeslinger/sendfile'
-	gs.rubyforge_project = 'ruby-sendfile'
 	gs.files = File.read('FILES').split($/)
 	gs.test_files = Dir.glob 'test/test_*.rb'
 	gs.extensions << 'ext/extconf.rb'
-	gs.has_rdoc = true
 	gs.extra_rdoc_files = %w(README.textile)
 	gs.required_ruby_version = '>= 1.8.0'
 end
